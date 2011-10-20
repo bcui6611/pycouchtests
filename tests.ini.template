@@ -11,10 +11,10 @@ port:5984
 
 #couchdb-remote-1 is used for replication tests
 [couchdb-remote-1]
-ip:172.16.75.130
+ip:10.1.4.245
 port:5984
 
 #couchdb-remote-2 is used for replication tests
 [couchdb-remote-2]
-ip:172.16.75.136
+ip:10.1.2.24
 port:5984
