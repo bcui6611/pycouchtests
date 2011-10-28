@@ -1,4 +1,5 @@
 import random
+import time
 from threading import Thread
 import unittest
 from nose import tools
@@ -156,6 +157,8 @@ class BasicTests(unittest.TestCase):
     def _compact_db(self, db_name):
         db = self.servers[0].get_or_create_db(db_name)
         db.compact()
+        while (db.info()['compact_running'] == True) :
+            time.sleep(1)
 
     def test_local_to_local_while_compacting(self):
         num_doc=5

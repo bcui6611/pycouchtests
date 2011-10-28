@@ -48,13 +48,13 @@ class AttachmentTests(unittest.TestCase):
     def test_attach001(self):
         log.info("ATTCH001 : save a document with a text/plain attachment where data is also a plain string")
         src_db, docs = self._get_db_and_generated_docs()
-        self._set_and_verify_attachment(docs, u"a random text attachment", "text/plain", "test_attach001")
+        self._set_and_verify_attachment(src_db, docs, u"a random text attachment", "text/plain", "test_attach001")
 
     #ATTCH002: save a document with text/plain attachment where data is an empty string
     def test_attach002(self):
         log.info("ATTCH002: save a document with text/plain attachment where data is an empty string")
         src_db, docs = self._get_db_and_generated_docs()
-        self._set_and_verify_attachment(docs, "", "text/plain", "test_attach002")
+        self._set_and_verify_attachment(src_db, docs, "", "text/plain", "test_attach002")
 
     #ATTCH003: add a new attachment to a document which already has an attachment
     def test_attach003(self):
@@ -91,7 +91,7 @@ class AttachmentTests(unittest.TestCase):
     def test_attach005(self):
         log.info("ATTCH001 : save a document with a text/plain attachment where data is also a plain string")
         src_db, docs = self._get_db_and_generated_docs()
-        self._set_and_verify_attachment(docs, u"a random text attachment", "text/plain;charset=utf-8", "test_attach005")
+        self._set_and_verify_attachment(src_db, docs, u"a random text attachment", "text/plain;charset=utf-8", "test_attach005")
 
 
     #ATTCH006: delete an attachment without specifying a revision ( should fail)
@@ -155,7 +155,7 @@ class AttachmentTests(unittest.TestCase):
                 {"size": 1024, "seed": str(uuid.uuid4())})
         return src_db, docs
 
-    def _set_and_verify_attachment(self, docs, attachment_base_string, content_type, attachment_name):
+    def _set_and_verify_attachment(self, src_db, docs, attachment_base_string, content_type, attachment_name):
         for doc in docs:
             src_db.save_doc(doc)
             text_attachment = attachment_base_string

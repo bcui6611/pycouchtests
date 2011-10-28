@@ -2,8 +2,11 @@ import random
 import unittest
 from nose import tools
 import uuid
+import hashlib
+import time
 from testconfig import config
 from couchdbkit import client
+from couchdbkit.exceptions import ResourceConflict
 import logger
 
 class BasicTests(unittest.TestCase):
@@ -20,15 +23,14 @@ class BasicTests(unittest.TestCase):
     def tearDown(self):
         for db in self.cleanup_dbs:
             try:
-                #self.server.delete_db(db)
-                pass
+                self.server.delete_db(db)
+                #pass
             except Exception:
                 pass
 
-        #all_dbs = [db for db in self.server.all_dbs()]
-        #for db in all_dbs:
-        #    if db.find("doctest") != -1:
-        #        self.server.delete_db(db)
+        for db in self.server.all_dbs():
+            if db.find("doctest") != -1:
+                self.server.delete_db(db)
         self.cleanup_dbs = []
 
     def _get_db_name(self):
@@ -262,3 +264,93 @@ class BasicTests(unittest.TestCase):
 
         fetched = self.server[db_name].get(res['id'])
         tools.ok_(self._doc_equals(doc,fetched))
+
+    def md5_for_data(self, data, block_size=2**20):
+        md5 = hashlib.md5()
+        md5.update(data)
+        return md5.digest()
+
+    def test_revision_compaction(self):
+        db_name = self._get_db_name()
+        db = self.server.get_or_create_db(db_name)
+        doc = {"_id":"revision","a":1,"b":1}
+        res = db.save_doc(doc)
+        fetched = db.get(res['id'])
+
+        doc1 = db.get(res['id'])
+        doc2 = db.get(res['id'])
+        try:
+            doc1["a"] = 100
+            db.save_doc(doc1)
+        except ResourceConflict:
+            assert "couchdb raises ResourceConflict"
+            pass
+
+        try:
+            doc2["a"] = 200
+            db.save_doc(doc2)
+            assert "couchdb does not raise ResourceConflict"
+        except ResourceConflict:
+            pass
+
+        r1 = {"_id":"doc","foo":"bar"};
+        r2 = {"_id":"doc","foo":"baz","_rev":"1-4c6114c65e295552ab1019e2b046b10e"}
+        r3 = {"_id":"doc","foo":"bam","_rev":"2-cfcd6781f13994bde69a1c3320bfdadb"}
+        r4 = {"_id":"doc","foo":"bat","_rev":"3-cc2f3210d779aef595cd4738be0ef8ff"}
+        db.save_doc(r1)
+        db.save_doc(r2)
+        db.save_doc(r3)
+        db.save_doc(r4)
+        fetched = db.open_doc(res['id'], revs=True, revs_info=True)
+        for rev in fetched['_revs_info']:
+            tools.eq_(rev['status'], 'available')
+
+        db.compact()
+        while (db.info()['compact_running'] == True) :
+            time.sleep(1)
+        
+        fetched = db.open_doc(res['id'], revs=True, revs_info=True)
+        for rev in fetched['_revs_info']:
+            if rev['rev'] == fetched['_rev']:
+                tools.eq_(rev['status'], 'available')
+            else:
+                tools.eq_(rev['status'], 'missing')
+
+    def test_attachment_compaction(self):
+        db_name = self._get_db_name()
+        db = self.server.get_or_create_db(db_name)
+        doc = {"_id":"doc","a":1,"b":1}
+        res = db.save_doc(doc)
+        fetched = db.get(res['id'])
+        attach_list = ['foo.txt', 'bar.txt', 'bam.txt']
+        for att in attach_list:
+            db.put_attachment(fetched, str(uuid.uuid4()), att, "text/plain")
+
+        before = []
+        before_md5 = []
+        fetched = db.open_doc(res['id'], revs=True)
+        before_att_meta = fetched['_attachments']
+        for att in attach_list:
+            att_doc = db.fetch_attachment(fetched, att)
+            before.append(att_doc)
+            before_md5.append(self.md5_for_data(att_doc))
+            
+        db.compact()
+        while (db.info()['compact_running'] == True) :
+            time.sleep(1)
+
+        after = []
+        after_md5 = []
+        fetched = db.open_doc(res['id'], revs=True)
+        after_att_meta = fetched['_attachments']
+        for att in attach_list:
+            att_doc = db.fetch_attachment(fetched, att)
+            after.append(att_doc)
+            after_md5.append(self.md5_for_data(att_doc))
+        
+        tools.eq_(len(before), len(after))
+        tools.eq_(len(before_md5), len(after_md5))
+        tools.eq_(before_att_meta, after_att_meta)
+        for i in range(len(before)):
+            tools.ok_(before[i] == after[i] and before_md5[i] == after_md5[i])
+
