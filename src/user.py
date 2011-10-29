@@ -113,16 +113,17 @@ class UserTests(unittest.TestCase):
         db_name = _get_db_name()
         db = server.get_or_create_db(db_name)
 
-        login(user, password)
-
-        for i in range(100):
-            doc = {"_id":"id_{0}".format(i), "a":random.randint(0, 1000), "b":1}
+        tools.ok_(login(user, password)['ok'])
+        num_doc = 100
+        id_range = 1000
+        for i in range(num_doc):
+            doc = {"_id":"id_{0}".format(i), "a":random.randint(0, id_range), "b":1}
             res = db.save_doc(doc)
             fetched = db.get(res['id'])
-            doc["a"] = random.randint(0,1000)
+            doc["a"] = random.randint(0,id_range)
             res = db.save_doc(doc)
 
-        logout()
+        tools.ok_(logout()['ok'])
 
     def test_multiple_users(self):
         self.createUsers()
