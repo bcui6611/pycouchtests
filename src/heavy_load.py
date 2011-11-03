@@ -138,7 +138,7 @@ class HeavyLoadTests(unittest.TestCase):
 
     def test_heavy_load_single_db(self):
         num_db = 1
-        num_doc = 1000
+        num_doc = 10000
         num_writer = 20
         db_name = self._get_db_name()
         db = self.servers[0].get_or_create_db(db_name)
