@@ -101,19 +101,37 @@ class UserTests(unittest.TestCase):
             if db.find("doctest") != -1:
                 self.server.delete_db(db)
 
-    def createUsers(self):
-        for i in range(self.num_user):
-            name = "user_{0}".format(i)
-            passwd = "password_{0}_{1}".format(i, name)
+    def _upload_docs(self, db, docs):
+        db.bulk_save(docs)
+
+    def _create_user_docs(self, num_user, baseid):
+        docs = []
+        for i in range(num_user):
+            name = "user_{0}".format(i+baseid)
+            passwd = "password_{0}_{1}".format(i+baseid, name)
             doc = prepareUserDoc({"name": name, "roles": ["dev"]}, passwd)
             if not self.user_db.doc_exist(doc["_id"]) :
-                self.user_db.save_doc(doc)
+                docs.append(doc)
+        
+        return docs
+
+    def createUsers(self, db, num_user, num_writer):
+        for i in range(num_writer):
+            docs = self._create_user_docs(num_user, i*num_writer)
+            writer = Thread(target=self._upload_docs, args=(db, docs,))
+            writer.start()
+            writer.join()
 
     def actor(self, server, user, password):
         db_name = _get_db_name()
         db = server.get_or_create_db(db_name)
+        self.log.info("user:"+user+" pwd:"+password)
+        try:
+            tools.ok_(login(user, password)['ok'])
+        except Exception:
+            self.log.info("Exception launched: Name or password is incorrect")
+            pass
 
-        tools.ok_(login(user, password)['ok'])
         num_doc = 100
         id_range = 1000
         for i in range(num_doc):
@@ -122,18 +140,163 @@ class UserTests(unittest.TestCase):
             fetched = db.get(res['id'])
             doc["a"] = random.randint(0,id_range)
             res = db.save_doc(doc)
+        try:
+            tools.ok_(logout()['ok'])
+        except Exception:
+            pass
 
-        tools.ok_(logout()['ok'])
+    def _test_multiple_users_multi_db(self):
+        num_user = 1000
+        num_writer = 20
+        self.createUsers(self.user_db, num_user, num_writer)
 
-    def test_multiple_users(self):
-        self.createUsers()
-
-        for i in range(self.num_user):
+        for i in range(num_user*num_writer):
             name = "user_{0}".format(i)
             passwd = "password_{0}_{1}".format(i, name)
             user = Thread(target=self.actor, args=(self.server, name, passwd,))
             user.start()
             user.join()
 
+    def _isodd(self, num):
+        return num & 1 and True or False
 
+    def _random_docs(self, howmany=1, baseid=0):
+        docs = []
+        for i in range(howmany):
+            id = "crud_{0}".format(i+baseid)
+            v1 = random.randint(0, 100)
+            v2 = random.randint(0, 10000)
+            if self._isodd(i):
+                type = "odd" 
+            else:
+                type = "even"
+            #have random key-values here ?
+            doc = {"_id": id, "a": v1, "b": v2, "c": str(uuid.uuid4())[:6], "type":type }
+            docs.append(doc)
+        return docs
 
+    def _crud_db(self, db, num_docs):
+        num_del = random.randint(0, num_docs) / 10
+        del_ids = []
+        for i in range(num_del):
+            del_ids.append(random.randint(0, num_docs))
+
+        for doc in range(num_docs):
+            id = "crud_{0}".format(random.randint(0, num_docs))
+            try:
+                fetched = db.get(id)
+                fetched["c"] = "new field"
+                db.save_doc(fetched)
+            except Exception:
+                self.log.info(id)
+                pass
+        for i in range(num_del):
+            id = "crud_{0}".format(del_ids[i])
+            try:
+                db.del_doc(id)
+            except Exception:
+                pass
+
+    def _upload_docs(self, db, docs):
+        db.bulk_save(docs)
+
+    def _quick_upload_datdabase(self, db, num_doc, num_writer):
+        for i in range(num_writer):
+            docs = self._random_docs(num_doc, i*num_doc)
+            writer = Thread(target=self._upload_docs, args=(db, docs,))
+            writer.start()
+            writer.join()
+
+    def _multi_design_view(self, db):
+        design_name = "_design/test"
+        design_doc = {
+            "_id": design_name,
+            "language": "javascript",
+            "views": {
+                "all_docs": {
+                    "map": "function(doc) { emit([doc.a, doc.b, doc.type], 1) };",
+                    "reduce": "function(keys, values) { return _count; }"
+                },
+                "multi_emit": {
+                    "map": "function(doc) {for(var i = 0 ; i < 3 ; i++) { emit(i, doc.a) ; } }"
+                },
+                "summate": {
+                    "map": "function (doc) {emit(doc.type, 1)};",
+                    "reduce": "function (keys, values) { return _count; };"
+                },
+                "get_by_a" : {
+                    "map": "function(doc) { if (doc.a > 50) emit(doc.a, 1) };"
+                },
+                "get_by_b" : {
+                    "map": "function(doc) { if (doc.b < 1000) emit(doc.b, 1) };",
+                    "reduce": "function(keys, values) { return _sum; };"
+                },
+                "get_by_c" : {
+                    "map": "function(doc) { emit(doc.c, [doc.a, doc.type]); };"
+                },
+                "get_by_ab" : {
+                    "map": "function(doc) { if (a > b) emit([doc.a, doc.b], 1); }",
+                    "reduce": "function(keys, values) { return _count; }"
+                },
+                "get_even" : {
+                    "map": """function(doc) { if (doc.type == "even") emit(null, 1);}"""
+                },
+                "get_odd" : {
+                    "map": """function(doc) { if (doc.type == "odd") emit(null, 1);}"""
+                }
+            }
+        };
+
+        if not db.doc_exist(design_name):
+            db.save_doc(design_doc)
+
+    def heavy_actor(self, db, user, password, total_doc):
+        self.log.info("user:"+user+" pwd:"+password)
+        try:
+            tools.ok_(login(user, password)['ok'])
+        except Exception:
+            self.log.info("Exception launched: Name or password is incorrect")
+            pass
+
+        running = Thread(target=self._crud_db, args=(db,total_doc,))
+        running.start()   
+        running.join()
+
+        try:
+            tools.ok_(logout()['ok'])
+        except Exception:
+            pass
+            
+    def test_multiple_users_single_db(self):
+        num_user = 1
+        num_writer = 2
+        self.createUsers(self.user_db, num_user, num_writer)
+
+        db_name = _get_db_name()
+        work_db = self.server.get_or_create_db(db_name)
+
+        num_doc = 10
+        num_writer = 2
+
+        self._quick_upload_datdabase(work_db, num_doc, num_writer)
+        all_docs = work_db.all_docs()
+        self.assertEqual(all_docs.total_rows, num_writer * num_doc)
+        
+        self._multi_design_view(work_db)
+
+        for i in range(self.num_user):
+            name = "user_{0}".format(i)
+            passwd = "password_{0}_{1}".format(i, name)
+            user = Thread(target=self.heavy_actor, args=(work_db, name, passwd, num_writer * num_doc))
+            user.start()
+            user.join()
+
+        rows = work_db.view("test/all_docs")
+        rows = work_db.view("test/multi_emit", startkey=100, endkey=300)
+        rows = work_db.view("test/summate", reduce=True, startkey_docid="1000", endkey_docid="4000")
+        rows = work_db.view("test/get_by_a", descending=True)
+        rows = work_db.view("test/get_by_b", group=True)
+        rows = work_db.view("test/get_by_c", group=True)
+        rows = work_db.view("test/get_by_ab", group_level=1)
+        rows = work_db.view("test/get_even")
+        rows = work_db.view("test/get_odd")

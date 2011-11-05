@@ -63,6 +63,28 @@ class HeavyLoadTests(unittest.TestCase):
             docs.append(doc)
         return docs
 
+    def _crud_db(self, db, num_docs):
+        num_del = random.randint(0, num_docs) / 10
+        del_ids = []
+        for i in range(num_del):
+            del_ids.append(random.randint(0, num_docs))
+
+        for doc in range(num_docs):
+            id = "crud_{0}".format(random.randint(0, num_docs))
+            try:
+                fetched = db.get(id)
+                fetched["c"] = "new field"
+                db.save_doc(fetched)
+            except Exception:
+                self.log.info(id)
+                pass
+        for i in range(num_del):
+            id = "crud_{0}".format(del_ids[i])
+            try:
+                db.del_doc(id)
+            except Exception:
+                pass
+
     def _populate_database(self, server, server_ip, num_db, num_doc, num_attachment, first_only=False):
         text_attachment = "a text attachment"
 
@@ -147,6 +169,10 @@ class HeavyLoadTests(unittest.TestCase):
         self.assertEqual(all_docs.total_rows, num_writer * num_doc)
         
         self._multi_design_view(db)
+
+        running = Thread(target=self._crud_db, args=(db,num_writer * num_doc,))
+        running.start()
+
         rows = db.view("test/all_docs")
         rows = db.view("test/multi_emit", startkey=100, endkey=300)
         rows = db.view("test/summate", reduce=True, startkey_docid="1000", endkey_docid="4000")
@@ -156,6 +182,8 @@ class HeavyLoadTests(unittest.TestCase):
         rows = db.view("test/get_by_ab", group_level=1)
         rows = db.view("test/get_even")
         rows = db.view("test/get_odd")
+        
+        running.join()
         
 
 
